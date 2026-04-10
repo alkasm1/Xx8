@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ALM Super QR - Mobile Edition</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <style>
+        :root { --primary: #0BA37F; --secondary: #2c7da0; --bg: #f4f7f6; }
+        body { font-family: 'Cairo', sans-serif; background-color: var(--bg); margin: 0; padding: 0; direction: rtl; }
+        header { background: var(--primary); color: white; padding: 15px; text-align: center; font-size: 20px; font-weight: bold; position: sticky; top: 0; z-index: 100; }
+        
+        .nav-tabs { display: flex; background: white; border-bottom: 1px solid #ddd; position: sticky; top: 54px; z-index: 100; }
+        .tab-btn { flex: 1; padding: 15px; border: none; background: none; font-family: 'Cairo'; font-size: 16px; color: #666; cursor: pointer; }
+        .tab-btn.active { color: var(--primary); border-bottom: 3px solid var(--primary); font-weight: bold; }
+
+        .container { padding: 15px; padding-bottom: 100px; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .card { background: white; border-radius: 15px; padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        textarea, input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-family: 'Cairo'; }
+        
+        button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; margin-top: 10px; cursor: pointer; }
+        .btn-secondary { background: var(--secondary); }
+        .btn-outline { background: #fff; color: var(--primary); border: 2px solid var(--primary); margin-top: 5px; }
+
+        /* QR Display Style */
+        .qr-item { background: #fff; padding: 15px; border-radius: 15px; margin-bottom: 20px; text-align: center; border: 1px solid #eee; }
+        .qr-canvas-holder { display: flex; justify-content: center; margin: 10px 0; }
+        .qr-actions { display: flex; gap: 10px; margin-top: 10px; }
+        .qr-actions button { flex: 1; font-size: 14px; padding: 10px; margin-top: 0; }
+        .btn-save { background: #444; }
+        .btn-share { background: #007bff; }
+
+        #scan-btn { position: fixed; bottom: 20px; left: 20px; width: 60px; height: 60px; border-radius: 50%; background: var(--primary); color: white; font-size: 24px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 200; }
+        
+        #reader-container { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #000; z-index: 1000; }
+        .close-scanner { position: absolute; top: 20px; right: 20px; color: white; font-size: 30px; z-index: 1001; }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body>
+
+<header>ALM Multi-QR Encoder</header>
+
+<div class="nav-tabs">
+    <button class="tab-btn active" onclick="showTab('encode')">تشفير</button>
+    <button class="tab-btn" onclick="showTab('decode')">فك التشفير</button>
+</div>
+
+<div class="container">
+    <!-- Encoding Tab -->
+    <div id="encode-tab" class="tab-content active">
+        <div class="card">
+            <h3>إنشاء باركود</h3>
+            <textarea id="inputText" rows="4" placeholder="اكتب النص هنا..."></textarea>
+            <input type="file" id="fileInput" accept=".pdf,.docx">
+            <input id="userKey" type="number" placeholder="مفتاح الأمان" value="123456789">
+            <button onclick="processEncoding()">توليد الباركودات</button>
+        </div>
+        
+        <button id="mergeBtn" class="btn-secondary" style="display:none; margin-bottom:15px;" onclick="generateSuperQR()">✨ دمج في باركود فائق (واحد فقط)</button>
+        
+        <div id="qrResults"></div>
+    </div>
+
+    <!-- Decoding Tab -->
+    <div id="decode-tab" class="tab-content">
+        <div class="card">
+            <h3>فك التشفير</h3>
+            <input type="file" id="qrFiles" accept="image/*" multiple>
+            <button onclick="processDecoding()">فك تشفير الصور المختارة</button>
+            <button class="btn-outline" onclick="processSuperDecoding()">فك باركود فائق</button>
+        </div>
+        <div class="card">
+            <h4>النص الناتج:</h4>
+            <div id="finalOutput" style="white-space: pre-wrap; font-size:14px; color:#444;"></div>
+        </div>
+    </div>
+</div>
+
+<div id="scan-btn" onclick="openCamera()"><i class="fas fa-camera"></i></div>
+
+<div id="reader-container">
+    <span class="close-scanner" onclick="closeCamera()">&times;</span>
+    <div id="reader"></div>
+</div>
+
+<script>
+    // --- النواة البرمجية ---
+    const B = 32, LMAX = 12, f0 = 100000n, df = 1n;
+    const indexToChar = {0:"",1:"ا",2:"ب",3:"ت",4:"ث",5:"ج",6:"ح",7:"خ",8:"د",9:"ذ",10:"ر",11:"ز",12:"س",13:"ش",14:"ص",15:"ض",16:"ط",17:"ظ",18:"ع",19:"غ",20:"ف",21:"ق",22:"ك",23:"ل",24:"م",25:"ن",26:"ه",27:"و",28:"ي",29:"ء"};
+    const charToIndex = Object.fromEntries(Object.entries(indexToChar).map(([k,v]) => [v, parseInt(k)]));
+
+    function normalizeText(s) { return s.replace(/[إأآ]/g, "ا").replace(/ى/g, "ي").replace(/ؤ/g, "و").replace(/ئ/g, "ي").replace(/ة/g, "ه").replace(/[^ءاأإآبتثجحخدذرزسشصضطظعغفقكلمنهوي\s]/g, ""); }
+    
+    function encodeWord(w, key) {
+        let c = new Array(LMAX).fill(0);
+        let chars = w.split('').reverse();
+        for(let i=0; i<Math.min(chars.length, LMAX); i++) c[i] = charToIndex[chars[i]] || 0;
+        let C = 0n;
+        for(let i=0; i<LMAX; i++) C += BigInt(c[i]) * (BigInt(B)**BigInt(i));
+        return (C ^ BigInt(key)).toString(36);
+    }
+
+    function decodeWord(code36, key) {
+        let C = BigInt(parseInt(code36, 36)) ^ BigInt(key);
+        let res = "";
+        for(let i=0; i<LMAX; i++) {
+            res = (indexToChar[Number(C % BigInt(B))] || "") + res;
+            C /= BigInt(B);
+        }
+        return res;
+    }
+
+    // --- وظائف الحفظ والمشاركة ---
+    async function saveQR(btn) {
+        const container = btn.closest('.qr-item');
+        const canvas = container.querySelector('canvas');
+        const link = document.createElement('a');
+        link.download = `ALM-QR-${Date.now()}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }
+
+    async function shareQR(btn) {
+        const container = btn.closest('.qr-item');
+        const canvas = container.querySelector('canvas');
+        const dataUrl = canvas.toDataURL("image/png");
+        const blob = await (await fetch(dataUrl)).blob();
+        const file = new File([blob], 'QR-Code.png', { type: 'image/png' });
+
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: 'ALM QR Code',
+                    text: 'باركود ALM مشفر'
+                });
+            } catch (err) { console.error("خطأ في المشاركة:", err); }
+        } else {
+            alert("متصفحك لا يدعم ميزة المشاركة المباشرة. جرب حفظ الصورة أولاً.");
+        }
+    }
+
+    // --- توليد وعرض الباركودات ---
+    let lastChunks = [];
+    async function processEncoding() {
+        const key = document.getElementById('userKey').value;
+        const text = normalizeText(document.getElementById('inputText').value);
+        if(!text) return alert("أدخل نصاً");
+
+        const words = text.split(/\s+/);
+        const chunkSize = 40; // عدد الكلمات في كل باركود
+        const resultsDiv = document.getElementById('qrResults');
+        resultsDiv.innerHTML = "";
+        lastChunks = [];
+
+        for (let i = 0; i < words.length; i += chunkSize) {
+            const chunk = words.slice(i, i + chunkSize);
+            const encoded = chunk.map(w => encodeWord(w, key)).join(',');
+            const compressed = LZString.compressToEncodedURIComponent(encoded);
+            const partNum = (i/chunkSize) + 1;
+            const totalParts = Math.ceil(words.length / chunkSize);
+            
+            const payload = `part=${partNum}/${totalParts}|${compressed}`;
+            lastChunks.push(compressed);
+            renderQR(payload, `الجزء ${partNum} من ${totalParts}`);
+        }
+        document.getElementById('mergeBtn').style.display = 'block';
+    }
+
+    function renderQR(payload, title) {
+        const div = document.createElement('div');
+        div.className = 'qr-item';
+        div.innerHTML = `<strong>${title}</strong><div class="qr-canvas-holder"></div>`;
+        
+        const actions = document.createElement('div');
+        actions.className = 'qr-actions';
+        actions.innerHTML = `
+            <button class="btn-save" onclick="saveQR(this)"><i class="fas fa-save"></i> حفظ</button>
+            <button class="btn-share" onclick="shareQR(this)"><i class="fas fa-share-alt"></i> مشاركة</button>
+        `;
+        
+        new QRCode(div.querySelector('.qr-canvas-holder'), {
+            text: payload,
+            width: 200,
+            height: 200,
+            correctLevel: QRCode.CorrectLevel.L
+        });
+        
+        div.appendChild(actions);
+        document.getElementById('qrResults').appendChild(div);
+    }
+
+    function generateSuperQR() {
+        const superData = JSON.stringify(lastChunks);
+        const compressed = LZString.compressToEncodedURIComponent(superData);
+        const payload = `super|${compressed}`;
+        
+        if(payload.length > 2500) return alert("البيانات كبيرة جداً للدمج في باركود واحد!");
+        
+        const resultsDiv = document.getElementById('qrResults');
+        resultsDiv.innerHTML = "<h3>✨ الباركود الفائق</h3>";
+        renderQR(payload, "كود مدمج شامل");
+    }
+
+    // --- فك التشفير والواجهة ---
+    function showTab(tab) {
+        document.querySelectorAll('.tab-content, .tab-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById(tab + '-tab').classList.add('active');
+        event.currentTarget.classList.add('active');
+    }
+
+    async function processDecoding() {
+        const files = document.getElementById('qrFiles').files;
+        const key = document.getElementById('userKey').value;
+        const scanner = new Html5Qrcode("reader");
+        let combinedText = "";
+
+        for(let file of files) {
+            try {
+                const result = await scanner.scanFile(file, true);
+                if(result.includes('|')) {
+                    const data = result.split('|')[1];
+                    const decompressed = LZString.decompressFromEncodedURIComponent(data);
+                    combinedText += decompressed.split(',').map(c => decodeWord(c, key)).join(' ') + " ";
+                }
+            } catch(e) {}
+        }
+        document.getElementById('finalOutput').textContent = combinedText;
+    }
+
+    // --- الكاميرا ---
+    let html5QrCode;
+    function openCamera() {
+        document.getElementById('reader-container').style.display = 'block';
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
+            alert("تم التقاط الكود بنجاح!");
+            console.log(text);
+            closeCamera();
+        });
+    }
+    function closeCamera() {
+        if(html5QrCode) html5QrCode.stop();
+        document.getElementById('reader-container').style.display = 'none';
+    }
+</script>
+
+</body>
+</html>
